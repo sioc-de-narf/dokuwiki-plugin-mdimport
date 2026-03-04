@@ -1,17 +1,8 @@
-base   mdimport
-author sioc-de-narf
-<<<<<<< HEAD
-email  sioc.de.narf@proton.me
-date   2026-03-03
-name   mdimport plugin
-desc   Import Markdown files into the editor
-url    https://www.dokuwiki.org/plugin:mdimport
-license    GPL 3
-=======
-email  14063185+sioc-de-narf@users.noreply.github.com
-date   2026-03-03
-name   importmd
-desc   Import Markdown files directly into the DokuWiki editor
-url    https://github.com/sioc-de-narf/dokuwiki-plugin-mdimport
+base    mdimport
+author  sioc-de-narf
+email   sioc.de.narf@proton.me
+date    2026-03-03
+name    importmd
+desc    Import Markdown files directly into the Dokuwiki editor
+url     https://www.dokuwiki.org/plugin:mdimport
 license GPL-3.0-or-later
->>>>>>> 0fa92a06292d917fadcd136b745f83f16b02448c
