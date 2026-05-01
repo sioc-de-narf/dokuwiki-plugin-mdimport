@@ -429,11 +429,26 @@ private function convertInline(string $text): string
             $code = str_replace('\\`', '`', $code);
 
             /*
-             * DokuWiki inline monospace is delimited by two single quotes.
-             * If the code itself contains two single quotes, neutralize them
-             * so the inline-code span does not break.
+             * DokuWiki parses markup inside inline monospace spans.
+             * Therefore, Markdown inline-code contents must be escaped before
+             * being wrapped in DokuWiki's ''...'' monospace syntax.
+             *
+             * Without this, values such as __init__, foo_bar, *literal*,
+             * [[not:a:link]], {{not-an-image.png}}, or <code bash> may be
+             * interpreted as DokuWiki markup after the Markdown conversion step.
              */
-            $code = str_replace("''", '&#039;&#039;', $code);
+            $code = strtr($code, [
+                '&' => '&amp;',
+                '<' => '&lt;',
+                '>' => '&gt;',
+                "'" => '&#039;',
+                '_' => '&#95;',
+                '*' => '&#42;',
+                '[' => '&#91;',
+                ']' => '&#93;',
+                '{' => '&#123;',
+                '}' => '&#125;',
+            ]);
 
             $codeSpans[$placeholder] = "''" . $code . "''";
 
