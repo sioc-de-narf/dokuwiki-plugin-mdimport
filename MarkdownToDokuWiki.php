@@ -410,11 +410,16 @@ private function convertInline(string $text): string
 
     /*
      * Inline code:
-     *   `code`          -> ''code''
-     *   ``code ` code`` -> ''code ` code''
+     *   `code`          -> ''%%code%%''
+     *   ``code ` code`` -> ''%%code ` code%%''
      *
      * Code spans are replaced by placeholders first, so later formatting
      * conversions cannot damage code contents.
+     *
+     * Two restore forms are stored:
+     * - dokuwiki: used for normal inline code outside links
+     * - plain:    used inside link labels and image alt text, because DokuWiki
+     *             link labels do not parse nested monospace/no-wiki markup
      */
     $text = preg_replace_callback(
         '/(?<!\\\\)(`+)([^\r\n]*?)(?<!`)\1(?!`)/',
@@ -437,21 +442,50 @@ private function convertInline(string $text): string
              * Use <nowiki> as fallback when the code itself contains %%.
              */
             if (str_contains($code, '%%') && !str_contains(strtolower($code), '</nowiki>')) {
-                $codeSpans[$placeholder] = "''<nowiki>" . $code . "</nowiki>''";
+                $dokuwikiCode = "''<nowiki>" . $code . "</nowiki>''";
             } else {
-                $codeSpans[$placeholder] = "''%%" . $code . "%%''";
+                $dokuwikiCode = "''%%" . $code . "%%''";
             }
+
+            $codeSpans[$placeholder] = [
+                'dokuwiki' => $dokuwikiCode,
+                'plain' => $code,
+            ];
 
             return $placeholder;
         },
         $text
     );
 
+    $restoreCodeSpans = static function (string $value, string $mode) use (&$codeSpans): string {
+        foreach ($codeSpans as $placeholder => $replacement) {
+            $value = str_replace($placeholder, $replacement[$mode], $value);
+        }
+
+        return $value;
+    };
+
     // Images: ![alt](url) → {{url|alt}}
-    $text = preg_replace('/!\[([^\]]*)\]\(([^)]+)\)/', '{{$2|$1}}', $text);
+    $text = preg_replace_callback(
+        '/!\[([^\]]*)\]\(([^)]+)\)/',
+        static function (array $matches) use ($restoreCodeSpans): string {
+            $alt = $restoreCodeSpans($matches[1], 'plain');
+
+            return '{{' . $matches[2] . '|' . $alt . '}}';
+        },
+        $text
+    );
 
     // Links: [text](url) → [[url|text]]
-    $text = preg_replace('/\[([^\]]+)\]\(([^)]+)\)/', '[[$2|$1]]', $text);
+    $text = preg_replace_callback(
+        '/\[([^\]]+)\]\(([^)]+)\)/',
+        static function (array $matches) use ($restoreCodeSpans): string {
+            $label = $restoreCodeSpans($matches[1], 'plain');
+
+            return '[[' . $matches[2] . '|' . $label . ']]';
+        },
+        $text
+    );
 
     // Bold: **text** or __text__ → **text**
     $text = preg_replace('/\*\*(.+?)\*\*/', '**$1**', $text);
@@ -461,10 +495,8 @@ private function convertInline(string $text): string
     $text = preg_replace('/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/', '//$1//', $text);
     $text = preg_replace('/(?<!_)_(?!_)(.+?)(?<!_)_(?!_)/', '//$1//', $text);
 
-    // Restore protected inline-code spans.
-    foreach ($codeSpans as $placeholder => $replacement) {
-        $text = str_replace($placeholder, $replacement, $text);
-    }
+    // Restore protected inline-code spans outside link labels/image alt text.
+    $text = $restoreCodeSpans($text, 'dokuwiki');
 
     // Escaped Markdown backticks outside code spans become literal backticks.
     $text = str_replace('\\`', '`', $text);
