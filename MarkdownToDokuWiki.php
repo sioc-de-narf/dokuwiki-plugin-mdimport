@@ -429,28 +429,18 @@ private function convertInline(string $text): string
             $code = str_replace('\\`', '`', $code);
 
             /*
-             * DokuWiki parses markup inside inline monospace spans.
-             * Therefore, Markdown inline-code contents must be escaped before
-             * being wrapped in DokuWiki's ''...'' monospace syntax.
+             * DokuWiki parses markup inside inline monospace spans. Wrap the
+             * content in DokuWiki's inline no-wiki syntax as well, so values
+             * such as __init__, foo_bar, *literal*, [[not:a:link]],
+             * {{not-an-image.png}}, or <code bash> stay literal after import.
              *
-             * Without this, values such as __init__, foo_bar, *literal*,
-             * [[not:a:link]], {{not-an-image.png}}, or <code bash> may be
-             * interpreted as DokuWiki markup after the Markdown conversion step.
+             * Use <nowiki> as fallback when the code itself contains %%.
              */
-            $code = strtr($code, [
-                '&' => '&amp;',
-                '<' => '&lt;',
-                '>' => '&gt;',
-                "'" => '&#039;',
-                '_' => '&#95;',
-                '*' => '&#42;',
-                '[' => '&#91;',
-                ']' => '&#93;',
-                '{' => '&#123;',
-                '}' => '&#125;',
-            ]);
-
-            $codeSpans[$placeholder] = "''" . $code . "''";
+            if (str_contains($code, '%%') && !str_contains(strtolower($code), '</nowiki>')) {
+                $codeSpans[$placeholder] = "''<nowiki>" . $code . "</nowiki>''";
+            } else {
+                $codeSpans[$placeholder] = "''%%" . $code . "%%''";
+            }
 
             return $placeholder;
         },
