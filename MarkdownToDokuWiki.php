@@ -402,139 +402,139 @@ class MarkdownToDokuWikiConverter
         return '>> ' . $this->convertInline(substr(ltrim($line), 1));
     }
 
-/**
- * Convert inline Markdown formatting to DokuWiki.
- *
- * Handles inline code, bold, italic, images, and links.
- *
- * Important:
- * Inline code is protected first, so content like `__init__`,
- * `foo_bar`, or `*literal*` is not modified by later bold/italic rules.
- *
- * @param string $text The text to convert.
- * @return string Converted text.
- */
-private function convertInline(string $text): string
-{
-    $codeSpans = [];
-    $convertedSpans = [];
-
-    /*
-     * Inline code:
-     *   `code`          -> ''%%code%%''
-     *   ``code ` code`` -> ''%%code ` code%%''
+    /**
+     * Convert inline Markdown formatting to DokuWiki.
      *
-     * Code spans are replaced by placeholders first, so later formatting
-     * conversions cannot damage code contents.
+     * Handles inline code, bold, italic, images, and links.
      *
-     * Two restore forms are stored:
-     * - dokuwiki: used for normal inline code outside links
-     * - plain:    used inside link labels and image alt text, because DokuWiki
-     *             link labels do not reliably support nested monospace/no-wiki markup
+     * Important:
+     * Inline code is protected first, so content like `__init__`,
+     * `foo_bar`, or `*literal*` is not modified by later bold/italic rules.
+     *
+     * @param string $text The text to convert.
+     * @return string Converted text.
      */
-    $text = preg_replace_callback(
-        '/(?<!\\\\)(`+)([^\r\n]*?)(?<!`)\1(?!`)/',
-        function (array $matches) use (&$codeSpans): string {
-            $placeholder = "\x1A" . count($codeSpans) . "\x1A";
+    private function convertInline(string $text): string
+    {
+        $codeSpans = [];
+        $convertedSpans = [];
 
-            $code = $matches[2];
+        /*
+         * Inline code:
+         *   `code`          -> ''%%code%%''
+         *   ``code ` code`` -> ''%%code ` code%%''
+         *
+         * Code spans are replaced by placeholders first, so later formatting
+         * conversions cannot damage code contents.
+         *
+         * Two restore forms are stored:
+         * - dokuwiki: used for normal inline code outside links
+         * - plain:    used inside link labels and image alt text, because DokuWiki
+         *             link labels do not reliably support nested monospace/no-wiki markup
+         */
+        $text = preg_replace_callback(
+            '/(?<!\\\\)(`+)([^\r\n]*?)(?<!`)\1(?!`)/',
+            function (array $matches) use (&$codeSpans): string {
+                $placeholder = "\x1A" . count($codeSpans) . "\x1A";
 
-            /*
-             * Preserve literal escaped backticks inside code spans.
-             */
-            $code = str_replace('\\`', '`', $code);
+                $code = $matches[2];
 
-            /*
-             * DokuWiki parses markup inside inline monospace spans. Wrap the
-             * content in DokuWiki's inline no-wiki syntax as well, so values
-             * such as __init__, foo_bar, *literal*, [[not:a:link]],
-             * {{not-an-image.png}}, or <code bash> stay literal after import.
-             *
-             * Use <nowiki> as fallback when the code itself contains %%.
-             */
-            if (str_contains($code, '%%') && !str_contains(strtolower($code), '</nowiki>')) {
-                $dokuwikiCode = "''<nowiki>" . $code . "</nowiki>''";
-            } else {
-                $dokuwikiCode = "''%%" . $code . "%%''";
+                /*
+                 * Preserve literal escaped backticks inside code spans.
+                 */
+                $code = str_replace('\\`', '`', $code);
+
+                /*
+                 * DokuWiki parses markup inside inline monospace spans. Wrap the
+                 * content in DokuWiki's inline no-wiki syntax as well, so values
+                 * such as __init__, foo_bar, *literal*, [[not:a:link]],
+                 * {{not-an-image.png}}, or <code bash> stay literal after import.
+                 *
+                 * Use <nowiki> as fallback when the code itself contains %%.
+                 */
+                if (str_contains($code, '%%') && !str_contains(strtolower($code), '</nowiki>')) {
+                    $dokuwikiCode = "''<nowiki>" . $code . "</nowiki>''";
+                } else {
+                    $dokuwikiCode = "''%%" . $code . "%%''";
+                }
+
+                $codeSpans[$placeholder] = [
+                    'dokuwiki' => $dokuwikiCode,
+                    'plain' => $code,
+                ];
+
+                return $placeholder;
+            },
+            $text
+        );
+
+        $restoreCodeSpans = static function (string $value, string $mode) use (&$codeSpans): string {
+            foreach ($codeSpans as $placeholder => $replacement) {
+                $value = str_replace($placeholder, $replacement[$mode], $value);
             }
 
-            $codeSpans[$placeholder] = [
-                'dokuwiki' => $dokuwikiCode,
-                'plain' => $code,
-            ];
+            return $value;
+        };
+
+        /*
+         * Protect already converted DokuWiki links/images before bold and italic
+         * conversion runs. Otherwise underscores or asterisks in URLs or link
+         * labels, for example sshd_config, may be converted to DokuWiki markup.
+         */
+        $protectConvertedSpan = static function (string $value) use (&$convertedSpans): string {
+            $placeholder = "\x1B" . count($convertedSpans) . "\x1B";
+            $convertedSpans[$placeholder] = $value;
 
             return $placeholder;
-        },
-        $text
-    );
+        };
 
-    $restoreCodeSpans = static function (string $value, string $mode) use (&$codeSpans): string {
-        foreach ($codeSpans as $placeholder => $replacement) {
-            $value = str_replace($placeholder, $replacement[$mode], $value);
-        }
+        $restoreConvertedSpans = static function (string $value) use (&$convertedSpans): string {
+            foreach ($convertedSpans as $placeholder => $replacement) {
+                $value = str_replace($placeholder, $replacement, $value);
+            }
 
-        return $value;
-    };
+            return $value;
+        };
 
-    /*
-     * Protect already converted DokuWiki links/images before bold and italic
-     * conversion runs. Otherwise underscores or asterisks in URLs or link
-     * labels, for example sshd_config, may be converted to DokuWiki markup.
-     */
-    $protectConvertedSpan = static function (string $value) use (&$convertedSpans): string {
-        $placeholder = "\x1B" . count($convertedSpans) . "\x1B";
-        $convertedSpans[$placeholder] = $value;
+        // Images: ![alt](url) → {{url|alt}}
+        $text = preg_replace_callback(
+            '/!\[([^\]]*)\]\(([^)]+)\)/',
+            static function (array $matches) use ($restoreCodeSpans, $protectConvertedSpan): string {
+                $alt = $restoreCodeSpans($matches[1], 'plain');
 
-        return $placeholder;
-    };
+                return $protectConvertedSpan('{{' . $matches[2] . '|' . $alt . '}}');
+            },
+            $text
+        );
 
-    $restoreConvertedSpans = static function (string $value) use (&$convertedSpans): string {
-        foreach ($convertedSpans as $placeholder => $replacement) {
-            $value = str_replace($placeholder, $replacement, $value);
-        }
+        // Links: [text](url) → [[url|text]]
+        $text = preg_replace_callback(
+            '/\[([^\]]+)\]\(([^)]+)\)/',
+            static function (array $matches) use ($restoreCodeSpans, $protectConvertedSpan): string {
+                $label = $restoreCodeSpans($matches[1], 'plain');
 
-        return $value;
-    };
+                return $protectConvertedSpan('[[' . $matches[2] . '|' . $label . ']]');
+            },
+            $text
+        );
 
-    // Images: ![alt](url) → {{url|alt}}
-    $text = preg_replace_callback(
-        '/!\[([^\]]*)\]\(([^)]+)\)/',
-        static function (array $matches) use ($restoreCodeSpans, $protectConvertedSpan): string {
-            $alt = $restoreCodeSpans($matches[1], 'plain');
+        // Bold: **text** or __text__ → **text**
+        $text = preg_replace('/\*\*(.+?)\*\*/', '**$1**', $text);
+        $text = preg_replace('/__(.+?)__/', '**$1**', $text);
 
-            return $protectConvertedSpan('{{' . $matches[2] . '|' . $alt . '}}');
-        },
-        $text
-    );
+        // Italic: *text* or _text_ → //text//
+        $text = preg_replace('/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/', '//$1//', $text);
+        $text = preg_replace('/(?<!_)_(?!_)(.+?)(?<!_)_(?!_)/', '//$1//', $text);
 
-    // Links: [text](url) → [[url|text]]
-    $text = preg_replace_callback(
-        '/\[([^\]]+)\]\(([^)]+)\)/',
-        static function (array $matches) use ($restoreCodeSpans, $protectConvertedSpan): string {
-            $label = $restoreCodeSpans($matches[1], 'plain');
+        // Restore protected links/images and inline-code spans.
+        $text = $restoreConvertedSpans($text);
+        $text = $restoreCodeSpans($text, 'dokuwiki');
 
-            return $protectConvertedSpan('[[' . $matches[2] . '|' . $label . ']]');
-        },
-        $text
-    );
+        // Escaped Markdown backticks outside code spans become literal backticks.
+        $text = str_replace('\\`', '`', $text);
 
-    // Bold: **text** or __text__ → **text**
-    $text = preg_replace('/\*\*(.+?)\*\*/', '**$1**', $text);
-    $text = preg_replace('/__(.+?)__/', '**$1**', $text);
-
-    // Italic: *text* or _text_ → //text//
-    $text = preg_replace('/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/', '//$1//', $text);
-    $text = preg_replace('/(?<!_)_(?!_)(.+?)(?<!_)_(?!_)/', '//$1//', $text);
-
-    // Restore protected links/images and inline-code spans.
-    $text = $restoreConvertedSpans($text);
-    $text = $restoreCodeSpans($text, 'dokuwiki');
-
-    // Escaped Markdown backticks outside code spans become literal backticks.
-    $text = str_replace('\\`', '`', $text);
-
-    return $text;
-}
+        return $text;
+    }
     /**
      * Flush any buffered paragraph lines to the output.
      *
