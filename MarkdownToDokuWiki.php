@@ -392,36 +392,80 @@ class MarkdownToDokuWikiConverter
         return '>> ' . $this->convertInline(substr(ltrim($line), 1));
     }
 
-    /**
-     * Convert inline Markdown formatting to DokuWiki.
+/**
+ * Convert inline Markdown formatting to DokuWiki.
+ *
+ * Handles inline code, bold, italic, images, and links.
+ *
+ * Important:
+ * Inline code is protected first, so content like `__init__`,
+ * `foo_bar`, or `*literal*` is not modified by later bold/italic rules.
+ *
+ * @param string $text The text to convert.
+ * @return string Converted text.
+ */
+private function convertInline(string $text): string
+{
+    $codeSpans = [];
+
+    /*
+     * Inline code:
+     *   `code`          -> ''code''
+     *   ``code ` code`` -> ''code ` code''
      *
-     * Handles bold, italic, inline code, images, and links.
-     *
-     * @param string $text The text to convert.
-     * @return string Converted text.
+     * Code spans are replaced by placeholders first, so later formatting
+     * conversions cannot damage code contents.
      */
-    private function convertInline(string $text): string
-    {
-        // Bold: **text** or __text__ → **text** (same in DokuWiki)
-        $text = preg_replace('/\*\*(.+?)\*\*/', '**$1**', $text);
-        $text = preg_replace('/__(.+?)__/', '**$1**', $text);
+    $text = preg_replace_callback(
+        '/(?<!\\\\)(`+)([^\r\n]*?)(?<!`)\1(?!`)/',
+        function (array $matches) use (&$codeSpans): string {
+            $placeholder = "\x1A" . count($codeSpans) . "\x1A";
 
-        // Italic: *text* or _text_ → //text//
-        $text = preg_replace('/\*(.+?)\*/', '//$1//', $text);
-        $text = preg_replace('/_(.+?)_/', '//$1//', $text);
+            $code = $matches[2];
 
-        // Inline code: `code` → ''code''
-        $text = preg_replace('/`(.+?)`/', "''$1''", $text);
+            /*
+             * Preserve literal escaped backticks inside code spans.
+             */
+            $code = str_replace('\\`', '`', $code);
 
-        // Images: ![alt](url) → {{url|alt}}
-        $text = preg_replace('/!\[([^\]]*)\]\(([^)]+)\)/', '{{$2|$1}}', $text);
+            /*
+             * DokuWiki inline monospace is delimited by two single quotes.
+             * If the code itself contains two single quotes, neutralize them
+             * so the inline-code span does not break.
+             */
+            $code = str_replace("''", '&#039;&#039;', $code);
 
-        // Links: [text](url) → [[url|text]]
-        $text = preg_replace('/\[([^\]]+)\]\(([^)]+)\)/', '[[$2|$1]]', $text);
+            $codeSpans[$placeholder] = "''" . $code . "''";
 
-        return $text;
+            return $placeholder;
+        },
+        $text
+    );
+
+    // Images: ![alt](url) → {{url|alt}}
+    $text = preg_replace('/!\[([^\]]*)\]\(([^)]+)\)/', '{{$2|$1}}', $text);
+
+    // Links: [text](url) → [[url|text]]
+    $text = preg_replace('/\[([^\]]+)\]\(([^)]+)\)/', '[[$2|$1]]', $text);
+
+    // Bold: **text** or __text__ → **text**
+    $text = preg_replace('/\*\*(.+?)\*\*/', '**$1**', $text);
+    $text = preg_replace('/__(.+?)__/', '**$1**', $text);
+
+    // Italic: *text* or _text_ → //text//
+    $text = preg_replace('/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/', '//$1//', $text);
+    $text = preg_replace('/(?<!_)_(?!_)(.+?)(?<!_)_(?!_)/', '//$1//', $text);
+
+    // Restore protected inline-code spans.
+    foreach ($codeSpans as $placeholder => $replacement) {
+        $text = str_replace($placeholder, $replacement, $text);
     }
 
+    // Escaped Markdown backticks outside code spans become literal backticks.
+    $text = str_replace('\\`', '`', $text);
+
+    return $text;
+}
     /**
      * Flush any buffered paragraph lines to the output.
      *
