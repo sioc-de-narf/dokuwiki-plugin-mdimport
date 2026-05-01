@@ -304,7 +304,17 @@ class MarkdownToDokuWikiConverter
         }
 
         $this->listStack[] = ['indent' => $indent, 'type' => $type];
-        $dokuIndent = str_repeat('  ', count($this->listStack) - 1);
+
+        /*
+         * DokuWiki requires list markers to be indented with at least two
+         * spaces. Top-level items therefore need one indentation level already:
+         *
+         *   * unordered item
+         *   - ordered item
+         *
+         * Nested Markdown lists add another two spaces per nesting level.
+         */
+        $dokuIndent = str_repeat('  ', count($this->listStack));
 
         // Remove the list marker and any leading spaces, then convert inline
         $content = $this->convertInline(preg_replace('/^\s*([\*\-\+]|\d+\.)\s+/', '', $line));
@@ -407,6 +417,7 @@ class MarkdownToDokuWikiConverter
 private function convertInline(string $text): string
 {
     $codeSpans = [];
+    $convertedSpans = [];
 
     /*
      * Inline code:
@@ -419,7 +430,7 @@ private function convertInline(string $text): string
      * Two restore forms are stored:
      * - dokuwiki: used for normal inline code outside links
      * - plain:    used inside link labels and image alt text, because DokuWiki
-     *             link labels do not parse nested monospace/no-wiki markup
+     *             link labels do not reliably support nested monospace/no-wiki markup
      */
     $text = preg_replace_callback(
         '/(?<!\\\\)(`+)([^\r\n]*?)(?<!`)\1(?!`)/',
@@ -465,13 +476,33 @@ private function convertInline(string $text): string
         return $value;
     };
 
+    /*
+     * Protect already converted DokuWiki links/images before bold and italic
+     * conversion runs. Otherwise underscores or asterisks in URLs or link
+     * labels, for example sshd_config, may be converted to DokuWiki markup.
+     */
+    $protectConvertedSpan = static function (string $value) use (&$convertedSpans): string {
+        $placeholder = "\x1B" . count($convertedSpans) . "\x1B";
+        $convertedSpans[$placeholder] = $value;
+
+        return $placeholder;
+    };
+
+    $restoreConvertedSpans = static function (string $value) use (&$convertedSpans): string {
+        foreach ($convertedSpans as $placeholder => $replacement) {
+            $value = str_replace($placeholder, $replacement, $value);
+        }
+
+        return $value;
+    };
+
     // Images: ![alt](url) → {{url|alt}}
     $text = preg_replace_callback(
         '/!\[([^\]]*)\]\(([^)]+)\)/',
-        static function (array $matches) use ($restoreCodeSpans): string {
+        static function (array $matches) use ($restoreCodeSpans, $protectConvertedSpan): string {
             $alt = $restoreCodeSpans($matches[1], 'plain');
 
-            return '{{' . $matches[2] . '|' . $alt . '}}';
+            return $protectConvertedSpan('{{' . $matches[2] . '|' . $alt . '}}');
         },
         $text
     );
@@ -479,10 +510,10 @@ private function convertInline(string $text): string
     // Links: [text](url) → [[url|text]]
     $text = preg_replace_callback(
         '/\[([^\]]+)\]\(([^)]+)\)/',
-        static function (array $matches) use ($restoreCodeSpans): string {
+        static function (array $matches) use ($restoreCodeSpans, $protectConvertedSpan): string {
             $label = $restoreCodeSpans($matches[1], 'plain');
 
-            return '[[' . $matches[2] . '|' . $label . ']]';
+            return $protectConvertedSpan('[[' . $matches[2] . '|' . $label . ']]');
         },
         $text
     );
@@ -495,7 +526,8 @@ private function convertInline(string $text): string
     $text = preg_replace('/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/', '//$1//', $text);
     $text = preg_replace('/(?<!_)_(?!_)(.+?)(?<!_)_(?!_)/', '//$1//', $text);
 
-    // Restore protected inline-code spans outside link labels/image alt text.
+    // Restore protected links/images and inline-code spans.
+    $text = $restoreConvertedSpans($text);
     $text = $restoreCodeSpans($text, 'dokuwiki');
 
     // Escaped Markdown backticks outside code spans become literal backticks.
