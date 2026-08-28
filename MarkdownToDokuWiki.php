@@ -304,7 +304,7 @@ class MarkdownToDokuWikiConverter
         }
 
         $this->listStack[] = ['indent' => $indent, 'type' => $type];
-        $dokuIndent = str_repeat('  ', count($this->listStack) - 1);
+        $dokuIndent = str_repeat('  ', count($this->listStack));
 
         // Remove the list marker and any leading spaces, then convert inline
         $content = $this->convertInline(preg_replace('/^\s*([\*\-\+]|\d+\.)\s+/', '', $line));
@@ -384,12 +384,17 @@ class MarkdownToDokuWikiConverter
      * Render a blockquote line.
      *
      * @param string $line The blockquote line.
-     * @return string DokuWiki blockquote (>> ...).
+     * @return string DokuWiki blockquote ('>' repeated per nesting level).
      */
     private function renderBlockquote(string $line): string
     {
-        // Remove leading '>' and any following space, then convert inline
-        return '>> ' . $this->convertInline(substr(ltrim($line), 1));
+        // DokuWiki uses one '>' per nesting level, exactly like Markdown,
+        // so count the markers instead of emitting a fixed prefix.
+        $line = ltrim($line);
+        preg_match('/^>+/', $line, $matches);
+        $level = strlen($matches[0]);
+
+        return str_repeat('>', $level) . ' ' . $this->convertInline(ltrim(substr($line, $level)));
     }
 
     /**
@@ -402,24 +407,44 @@ class MarkdownToDokuWikiConverter
      */
     private function convertInline(string $text): string
     {
-        // Bold: **text** or __text__ → **text** (same in DokuWiki)
-        $text = preg_replace('/\*\*(.+?)\*\*/', '**$1**', $text);
-        $text = preg_replace('/__(.+?)__/', '**$1**', $text);
-
-        // Italic: *text* or _text_ → //text//
-        $text = preg_replace('/\*(.+?)\*/', '//$1//', $text);
-        $text = preg_replace('/_(.+?)_/', '//$1//', $text);
+        // Code spans, images and links are converted first and parked behind
+        // placeholders, so the emphasis passes below cannot chew through their
+        // content (an underscore in a URL, an asterisk inside a code span).
+        $parked = [];
+        $park = static function (string $replacement) use (&$parked): string {
+            $key = "\x00" . count($parked) . "\x00";
+            $parked[$key] = $replacement;
+            return $key;
+        };
 
         // Inline code: `code` → ''code''
-        $text = preg_replace('/`(.+?)`/', "''$1''", $text);
+        $text = preg_replace_callback('/`(.+?)`/', static fn($m) => $park("''" . $m[1] . "''"), $text);
 
         // Images: ![alt](url) → {{url|alt}}
-        $text = preg_replace('/!\[([^\]]*)\]\(([^)]+)\)/', '{{$2|$1}}', $text);
+        $text = preg_replace_callback(
+            '/!\[([^\]]*)\]\(([^)]+)\)/',
+            static fn($m) => $park('{{' . $m[2] . '|' . $m[1] . '}}'),
+            $text
+        );
 
         // Links: [text](url) → [[url|text]]
-        $text = preg_replace('/\[([^\]]+)\]\(([^)]+)\)/', '[[$2|$1]]', $text);
+        $text = preg_replace_callback(
+            '/\[([^\]]+)\]\(([^)]+)\)/',
+            static fn($m) => $park('[[' . $m[2] . '|' . $m[1] . ']]'),
+            $text
+        );
 
-        return $text;
+        // Bold: **text** stays as is in DokuWiki, __text__ becomes **text**
+        $text = preg_replace('/__(.+?)__/', '**$1**', $text);
+
+        // Italic: *text* or _text_ → //text//. The lookarounds keep a single
+        // marker from matching one half of a '**' pair, which used to turn
+        // '**bold**' into '//*bold//*'. Underscores inside a word are left
+        // alone, as in Markdown, so snake_case and bare URLs survive.
+        $text = preg_replace('/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/', '//$1//', $text);
+        $text = preg_replace('/(?<![\w_])_(?!_)(.+?)(?<!_)_(?![\w_])/u', '//$1//', $text);
+
+        return strtr($text, $parked);
     }
 
     /**

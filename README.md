@@ -77,9 +77,9 @@ The conversion uses an internal PHP class (`MarkdownToDokuWikiConverter`) and re
 | `` `code` `` | `''code''` | |
 | `[link](url)` | `[[url|link]]` | |
 | `![alt](image.jpg)` | `{{image.jpg|alt}}` | |
-| `- item` or `* item` | `* item` (unordered) | Nested lists use two‑space indentation |
-| `1. item` | `- item` (ordered) | Ordered lists become DokuWiki unordered lists with a dash; numbering is not preserved |
-| `> quote` | `>> quote` | |
+| `- item` or `* item` | `  * item` (unordered) | Every level is indented by two spaces, starting at two for the top level — DokuWiki needs them to see a list |
+| `1. item` | `  - item` (ordered) | Same two‑space indentation; numbering is not preserved, DokuWiki renumbers on its own |
+| `> quote` | `> quote` | One `>` per nesting level, as in Markdown: `>> quote` stays `>> quote` |
 | `---` | `----` | Horizontal rule |
 | `` ``` `` | `<code>` and `</code>` | Language hint preserved (e.g., ` ```php `) |
 | `\| Header \|` | `^ Header ^` | Table rows; alignment is detected from the separator line |
