@@ -12,13 +12,22 @@ function addBtnActionMdimport($btn, props, edid) {
             var reader = new FileReader();
             reader.onload = function(e) {
                 var content = e.target.result;
+                var sectok = jQuery('#dw__editform input[name="sectok"]').val()
+                          || jQuery('input[name="sectok"]').first().val()
+                          || '';
 
-                fetch('lib/plugins/mdimport/convert.php', {
+                fetch(DOKU_BASE + 'lib/exe/ajax.php', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: 'content=' + encodeURIComponent(content)
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+                    credentials: 'same-origin',
+                    body: 'call=plugin_mdimport'
+                        + '&sectok=' + encodeURIComponent(sectok)
+                        + '&content=' + encodeURIComponent(content)
                 })
-                .then(response => response.text())
+                .then(response => {
+                    if (!response.ok) throw new Error('HTTP ' + response.status);
+                    return response.text();
+                })
                 .then(convertedContent => {
                     insertAtCarret(edid, convertedContent);
                 })
